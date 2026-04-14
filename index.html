@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Sber Toy Ultra</title>
+    
+    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-database.js"></script>
+    <script src="https://unpkg.com/html5-qrcode"></script>
+
+    <style>
+        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; outline: none; }
+        body, html { margin: 0; padding: 0; height: 100%; width: 100%; font-family: sans-serif; background: #000; color: white; overflow: hidden; }
+
+        /* ЭКРАН ВХОДА */
+        #auth-screen, #reg-screen {
+            position: fixed; inset: 0; z-index: 999;
+            background: url('https://images.unsplash.com/photo-1557683316-973673baf926?q=80') center/cover;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            padding: 20px;
+        }
+        #auth-screen::before, #reg-screen::before { content: ""; position: absolute; inset: 0; background: rgba(0,0,0,0.5); backdrop-filter: blur(25px); -webkit-backdrop-filter: blur(25px); z-index: -1; }
+
+        .pin-dots { display: flex; gap: 15px; margin: 30px 0 50px; }
+        .pin-dot { width: 14px; height: 14px; border: 2px solid rgba(255,255,255,0.4); border-radius: 50%; }
+        .pin-dot.active { background: white; border-color: white; }
+
+        .numpad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+        .num-btn {
+            background: rgba(255,255,255,0.1); border: none; border-radius: 50%; 
+            width: 75px; height: 75px; color: white; font-size: 24px; cursor: pointer;
+        }
+
+        /* ЭКРАН РЕГИСТРАЦИИ */
+        #reg-screen { display: none; }
+        .reg-input { width: 100%; max-width: 300px; padding: 15px; border-radius: 15px; border: 1px solid #444; background: #111; color: #fff; margin-bottom: 20px; text-align: center; font-size: 18px; }
+        .reg-btn { width: 100%; max-width: 300px; padding: 15px; background: #21a038; border: none; border-radius: 15px; color: #fff; font-weight: bold; font-size: 18px; }
+
+        /* ГЛАВНОЕ ПРИЛОЖЕНИЕ */
+        #app-screen { display: none; height: 100%; flex-direction: column; }
+        .header { padding: 15px; display: flex; align-items: center; gap: 15px; border-bottom: 1px solid #1c1c1e; }
+        .card { min-width: 200px; height: 120px; background: #1c1c1e; border-radius: 20px; padding: 15px; margin: 10px; border: 1px solid #333; }
+        .footer { position: fixed; bottom: 0; width: 100%; height: 70px; background: #0a0a0a; display: flex; justify-content: space-around; align-items: center; border-top: 1px solid #222; }
+        .f-item { text-align: center; color: #8e8e93; font-size: 11px; }
+        .f-item.active { color: #21a038; }
+
+        #scanner-box { position: fixed; inset: 0; background: #000; z-index: 1001; display: none; }
+    </style>
+</head>
+<body>
+
+    <div id="auth-screen">
+        <h2 style="margin-bottom: 0;">СберБанк</h2>
+        <div class="pin-dots" id="dots">
+            <div class="pin-dot"></div><div class="pin-dot"></div><div class="pin-dot"></div><div class="pin-dot"></div><div class="pin-dot"></div>
+        </div>
+        <div class="numpad" id="numpad"></div>
+    </div>
+
+    <div id="reg-screen">
+        <h2 style="color:#21a038">Новый клиент</h2>
+        <p style="opacity: 0.7; text-align: center;">Придумайте имя для вашего<br>игрушечного счета</p>
+        <input type="text" id="reg-name" class="reg-input" placeholder="Ваше имя">
+        <button class="reg-btn" onclick="finishReg()">СОЗДАТЬ АККАУНТ</button>
+        <p style="font-size: 12px; margin-top: 20px; opacity: 0.5;">Ваш ПИН: <span id="reg-pin-val"></span></p>
+    </div>
+
+    <div id="app-screen">
+        <div class="header">
+            <div style="width:35px; height:35px; background:#21a038; border-radius:50%"></div>
+            <div style="flex:1">Привет, <b id="u-name">...</b></div>
+            <div onclick="addMoney()" style="font-size:20px">⚙️</div>
+        </div>
+        <div style="padding: 20px;">
+            <div class="card" style="background: linear-gradient(135deg, #111, #222); width: calc(100% - 20px);">
+                <div style="color: #888; font-size: 12px;">Баланс</div>
+                <div id="u-bal" style="font-size: 30px; font-weight: bold; margin: 10px 0;">0 ₽</div>
+                <div style="font-size: 12px; color: #21a038;">Игрушечная карта • 9848</div>
+            </div>
+            <h3>История</h3>
+            <div id="hist" style="background: #111; border-radius: 15px; max-height: 300px; overflow-y: auto;"></div>
+        </div>
+        <div class="footer">
+            <div class="f-item active"><i>🏠</i><br>Главный</div>
+            <div class="f-item" onclick="openQR()"><i>🔳</i><br>Платежи</div>
+            <div class="f-item" onclick="openQR()"><i>💸</i><br>Переводы</div>
+            <div class="f-item" onclick="location.reload()"><i>🚪</i><br>Выход</div>
+        </div>
+    </div>
+
+    <div id="scanner-box">
+        <div style="padding:20px; display:flex; justify-content:space-between;">
+            <b>QR Сканер</b>
+            <b onclick="closeQR()">✕</b>
+        </div>
+        <div id="reader"></div>
+    </div>
+
+<script>
+    firebase.initializeApp({databaseURL: "https://sbep-15509-default-rtdb.firebaseio.com"});
+    const db = firebase.database();
+    let currentPin = "";
+    let userData = null;
+
+    // ГЕНЕРАЦИЯ КНОПОК
+    const pad = document.getElementById('numpad');
+    [1,2,3,4,5,6,7,8,9,'?',0,'⌫'].forEach(val => {
+        const btn = document.createElement('button');
+        btn.className = 'num-btn';
+        btn.innerText = val;
+        btn.onclick = () => press(val);
+        pad.appendChild(btn);
+    });
+
+    function press(v) {
+        if(v === '⌫') currentPin = currentPin.slice(0, -1);
+        else if(v === '?') alert("ПИН - это ваш уникальный ключ");
+        else if(currentPin.length < 5) currentPin += v;
+        
+        document.querySelectorAll('.pin-dot').forEach((d, i) => d.classList.toggle('active', i < currentPin.length));
+        if(currentPin.length === 5) checkAuth();
+    }
+
+    async function checkAuth() {
+        const snap = await db.ref('users/' + currentPin).once('value');
+        if(snap.exists()) {
+            userData = snap.val();
+            showApp();
+        } else {
+            // ПОКАЗЫВАЕМ ЭКРАН РЕГИСТРАЦИИ
+            document.getElementById('auth-screen').style.display = 'none';
+            document.getElementById('reg-screen').style.display = 'flex';
+            document.getElementById('reg-pin-val').innerText = currentPin;
+        }
+    }
+
+    async function finishReg() {
+        const name = document.getElementById('reg-name').value;
+        if(!name) return alert("Введите имя!");
+        
+        userData = {
+            name: name,
+            bal: 15000,
+            history: [{t: 'Бонус за регистрацию', a: 15000}]
+        };
+        
+        await db.ref('users/' + currentPin).set(userData);
+        showApp();
+    }
+
+    function showApp() {
+        document.getElementById('auth-screen').style.display = 'none';
+        document.getElementById('reg-screen').style.display = 'none';
+        document.getElementById('app-screen').style.display = 'flex';
+        
+        db.ref('users/' + currentPin).on('value', s => {
+            userData = s.val();
+            document.getElementById('u-name').innerText = userData.name;
+            document.getElementById('u-bal').innerText = userData.bal.toLocaleString() + " ₽";
+            document.getElementById('hist').innerHTML = userData.history.slice().reverse().map(i => `
+                <div style="padding:15px; border-bottom:1px solid #222; display:flex; justify-content:space-between;">
+                    <span>${i.t}</span><b style="color:${i.a>0?'#21a038':'#f44'}">${i.a>0?'+':''}${i.a}</b>
+                </div>
+            `).join('');
+        });
+    }
+
+    function openQR() {
+        document.getElementById('scanner-box').style.display = 'block';
+        const html5QrCode = new Html5Qrcode("reader");
+        html5QrCode.start({ facingMode: "environment" }, { fps: 10, qrbox: 250 }, (txt) => {
+            html5QrCode.stop();
+            document.getElementById('scanner-box').style.display = 'none';
+            pay(txt);
+        });
+    }
+
+    function closeQR() { document.getElementById('scanner-box').style.display = 'none'; location.reload(); }
+
+    async function pay(target) {
+        if(target === currentPin) return alert("Себе нельзя!");
+        const amt = parseFloat(prompt("Сумма перевода игроку " + target + ":"));
+        if(!amt || amt > userData.bal) return alert("Ошибка суммы!");
+
+        const tSnap = await db.ref('users/' + target).once('value');
+        if(!tSnap.exists()) return alert("Игрок не найден!");
+
+        // Снимаем у нас
+        userData.bal -= amt;
+        userData.history.push({t: 'Перевод на ' + target, a: -amt});
+        await db.ref('users/' + currentPin).update(userData);
+
+        // Даем ему
+        const tData = tSnap.val();
+        tData.bal += amt;
+        tData.history.push({t: 'От ' + userData.name, a: amt});
+        await db.ref('users/' + target).update(tData);
+        alert("Переведено!");
+    }
+
+    function addMoney() {
+        userData.bal += 50000;
+        userData.history.push({t: 'Админ бонус', a: 50000});
+        db.ref('users/' + currentPin).update(userData);
+    }
+</script>
+</body>
+</html>
